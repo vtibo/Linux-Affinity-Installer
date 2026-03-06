@@ -21,7 +21,7 @@ This document lists known issues and their workarounds. For the latest updates, 
 
 **Note:** This is a Wine/Windows compatibility limitation that cannot be fixed within the scope of this project. The issue stems from Wine's window management implementation not properly handling Affinity's complex UI layout system.
 
-**Workaround:** None available. Keep all UI elements in their default docked positions.
+**Workaround:** Set your preffered Layout with docked panels on an existing Windows or Mac installation of Affinity Studio. Export the studio and import it on Affinity for Linux. The chosen layout will be adopted and can always be restored if a panel is moved by accident.
 
 ### AppImage Memory Issues (Excessive RAM Usage and Random Crashes)
 **Issue:** The Affinity AppImage consumes unusually large amounts of RAM during normal usage and may randomly crash, affecting system stability.
