@@ -224,6 +224,7 @@ class AffinityInstallerGUI(QMainWindow):
     install_application_signal = pyqtSignal(str)
     show_spinner_signal = pyqtSignal(object)
     hide_spinner_signal = pyqtSignal(object)
+    gpu_selection_signal = pyqtSignal()
     
     def __init__(self):
         startup_start = time.time()
@@ -298,6 +299,8 @@ class AffinityInstallerGUI(QMainWindow):
         self.install_application_signal.connect(self.install_application)
         self.show_spinner_signal.connect(self._show_spinner_safe)
         self.hide_spinner_signal.connect(self._hide_spinner_safe)
+        self.waiting_for_gpu_selection = False
+        self.gpu_selection_signal.connect(self._configure_gpu_selection_safe)
         step_start = log_timing("Signal connections", step_start)
         
         self.create_ui()
@@ -5657,6 +5660,7 @@ class AffinityInstallerGUI(QMainWindow):
             self.question_dialog_response = "Cancel"
         
         self.waiting_for_question_response = False
+        self.waiting_for_gpu_selection = False
 
 
     def configure_gpu_selection(self):
