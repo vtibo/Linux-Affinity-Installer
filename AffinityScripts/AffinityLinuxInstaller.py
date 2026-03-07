@@ -5620,6 +5620,7 @@ class AffinityInstallerGUI(QMainWindow):
                     break
             
             if selected_id:
+                self.question_dialog_response = selected_id
                 # Save selection
                 try:
                     with open(gpu_config_file, 'w') as f:
