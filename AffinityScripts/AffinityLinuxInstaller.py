@@ -3232,16 +3232,6 @@ class AffinityInstallerGUI(QMainWindow):
         if is_wine_version_dialog:
             self._show_wine_version_dialog_safe()
             return
-
-        # Check if this is a GPU selection dialog
-        is_gpu_selection_dialog = (
-            "GPU Selection" in title or
-            "GPU" in title and "Selection" in title or
-            (isinstance(message, str) and ("select which gpu" in message.lower() or "dual gpu" in message.lower()))
-        )
-        if is_gpu_selection_dialog:
-            self._configure_gpu_selection_safe()
-            return
         
         # Convert button list to QMessageBox buttons
         qbuttons = QMessageBox.StandardButton.NoButton
