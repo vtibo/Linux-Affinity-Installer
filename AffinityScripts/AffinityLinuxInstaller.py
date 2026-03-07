@@ -220,6 +220,7 @@ class AffinityInstallerGUI(QMainWindow):
     interactive_prompt_signal = pyqtSignal(str, str)
     question_dialog_signal = pyqtSignal(str, str, list)
     nvidia_dxvk_vkd3d_choice_signal = pyqtSignal()
+    gpu_selection_signal = pyqtSignal()
     prompt_affinity_install_signal = pyqtSignal()
     install_application_signal = pyqtSignal(str)
     show_spinner_signal = pyqtSignal(object)
@@ -298,6 +299,8 @@ class AffinityInstallerGUI(QMainWindow):
         self.install_application_signal.connect(self.install_application)
         self.show_spinner_signal.connect(self._show_spinner_safe)
         self.hide_spinner_signal.connect(self._hide_spinner_safe)
+        self.waiting_for_gpu_selection = False
+        self.gpu_selection_signal.connect(self._configure_gpu_selection_safe)
         step_start = log_timing("Signal connections", step_start)
         
         self.create_ui()
@@ -3229,6 +3232,16 @@ class AffinityInstallerGUI(QMainWindow):
         if is_wine_version_dialog:
             self._show_wine_version_dialog_safe()
             return
+
+        # Check if this is a GPU selection dialog
+        is_gpu_selection_dialog = (
+            "GPU Selection" in title or
+            "GPU" in title and "Selection" in title or
+            (isinstance(message, str) and ("select which gpu" in message.lower() or "dual gpu" in message.lower()))
+        )
+        if is_gpu_selection_dialog:
+            self._configure_gpu_selection_safe()
+            return
         
         # Convert button list to QMessageBox buttons
         qbuttons = QMessageBox.StandardButton.NoButton
@@ -5442,8 +5455,8 @@ class AffinityInstallerGUI(QMainWindow):
                 return "DXVK_ASYNC=0 DXVK_CONFIG=\"d3d9.deferSurfaceCreation = True; d3d9.shaderModel = 1\" "
         return ""
     
-    def configure_gpu_selection(self):
-        """Configure GPU selection for dual GPU setups"""
+    def _configure_gpu_selection_safe(self):
+        """Configure GPU selection for dual GPU setups (safe UI slot)"""
         gpus = self.detect_gpus()
         
         if len(gpus) <= 1:
@@ -5454,6 +5467,11 @@ class AffinityInstallerGUI(QMainWindow):
                 "Your system will use the default GPU automatically.",
                 "info"
             )
+            # Ensure waiting flag is cleared for background callers
+            try:
+                self.waiting_for_gpu_selection = False
+            except Exception:
+                pass
             return
         
         # Load current selection
@@ -5622,6 +5640,24 @@ class AffinityInstallerGUI(QMainWindow):
                     )
                 except Exception as e:
                     self.log(f"Failed to save GPU selection: {e}", "error")
+        # Ensure waiting flag is cleared for background callers (dialog finished)
+        try:
+            self.waiting_for_gpu_selection = False
+        except Exception:
+            pass
+
+    def configure_gpu_selection(self):
+        """Ask user to select GPU for dual-GPU setups (thread-safe)"""
+        self.waiting_for_gpu_selection = True
+        self.gpu_selection_signal.emit()
+
+        # Block the calling thread until the main thread finishes the dialog
+        max_wait = 3000  # 5 minutes max wait
+        waited = 0
+        while self.waiting_for_gpu_selection and waited < max_wait:
+            import time
+            time.sleep(0.1)
+            waited += 1
     
     def get_switch_backend_button_text(self):
         """Get the text for the switch backend button based on current backend"""
