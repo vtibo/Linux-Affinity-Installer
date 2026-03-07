@@ -299,8 +299,6 @@ class AffinityInstallerGUI(QMainWindow):
         self.install_application_signal.connect(self.install_application)
         self.show_spinner_signal.connect(self._show_spinner_safe)
         self.hide_spinner_signal.connect(self._hide_spinner_safe)
-        self.waiting_for_gpu_selection = False
-        self.gpu_selection_signal.connect(self._configure_gpu_selection_safe)
         step_start = log_timing("Signal connections", step_start)
         
         self.create_ui()
@@ -5530,7 +5528,8 @@ class AffinityInstallerGUI(QMainWindow):
         # Description
         desc_label = QLabel(
             "Select which GPU to use for Affinity applications:\n\n"
-            "This is useful for dual GPU setups (e.g., Intel + NVIDIA, AMD + NVIDIA)."
+            "This is useful for dual GPU setups (e.g., Intel + NVIDIA, AMD + NVIDIA).\n"
+            "If you want to enable OpenCL and have a NVIDIA GPU, it's recommended to select it for better compatibility.\n"
         )
         desc_label.setObjectName("descriptionLabel")
         desc_label.setWordWrap(True)
@@ -5640,11 +5639,12 @@ class AffinityInstallerGUI(QMainWindow):
                     )
                 except Exception as e:
                     self.log(f"Failed to save GPU selection: {e}", "error")
-        # Ensure waiting flag is cleared for background callers (dialog finished)
-        try:
-            self.waiting_for_gpu_selection = False
-        except Exception:
-            pass
+        else:
+            # User cancelled - return "Cancel" to match expected format
+            self.question_dialog_response = "Cancel"
+        
+        self.waiting_for_question_response = False
+
 
     def configure_gpu_selection(self):
         """Ask user to select GPU for dual-GPU setups (thread-safe)"""
