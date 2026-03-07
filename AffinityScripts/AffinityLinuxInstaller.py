@@ -220,7 +220,6 @@ class AffinityInstallerGUI(QMainWindow):
     interactive_prompt_signal = pyqtSignal(str, str)
     question_dialog_signal = pyqtSignal(str, str, list)
     nvidia_dxvk_vkd3d_choice_signal = pyqtSignal()
-    gpu_selection_signal = pyqtSignal()
     prompt_affinity_install_signal = pyqtSignal()
     install_application_signal = pyqtSignal(str)
     show_spinner_signal = pyqtSignal(object)
@@ -4984,6 +4983,18 @@ class AffinityInstallerGUI(QMainWindow):
         gpus = self.detect_gpus()
         return any(gpu["type"] == "nvidia" for gpu in gpus)
     
+    def get_selected_gpu(self):
+        """Get environment variables for GPU selection"""
+        gpu_config_file = Path(self.directory) / ".gpu_config"
+        gpu_id = "auto"
+        if gpu_config_file.exists():
+            try:
+                with open(gpu_config_file, 'r') as f:
+                    gpu_id = f.read().strip()
+            except Exception:
+                gpu_id = "auto"
+        return gpu_id
+    
     def get_dxvk_vkd3d_preference(self):
         """Get DXVK/vkd3d preference for NVIDIA users"""
         pref_file = Path(self.directory) / ".dxvk_vkd3d_preference"
@@ -5445,12 +5456,13 @@ class AffinityInstallerGUI(QMainWindow):
     
     def get_dxvk_env_vars(self):
         """Get DXVK environment variables for AMD GPU or NVIDIA GPU with DXVK preference"""
-        if self.has_amd_gpu():
-            return "DXVK_ASYNC=0 DXVK_CONFIG=\"d3d9.deferSurfaceCreation = True; d3d9.shaderModel = 1\" "
-        elif self.has_nvidia_gpu():
+        gpu_id = self.get_selected_gpu()
+        if self.has_nvidia_gpu() and (gpu_id.startswith("nvidia_") or gpu_id.startswith("auto")):
             preference = self.get_dxvk_vkd3d_preference()
             if preference == "dxvk":
                 return "DXVK_ASYNC=0 DXVK_CONFIG=\"d3d9.deferSurfaceCreation = True; d3d9.shaderModel = 1\" "
+        elif self.has_amd_gpu() and (gpu_id.startswith("amd_") or gpu_id.startswith("auto")):
+            return "DXVK_ASYNC=0 DXVK_CONFIG=\"d3d9.deferSurfaceCreation = True; d3d9.shaderModel = 1\" "
         return ""
     
     def _configure_gpu_selection_safe(self):
@@ -6324,6 +6336,22 @@ class AffinityInstallerGUI(QMainWindow):
         
         # Ensure patcher files are available
         self.ensure_patcher_files()
+
+        # Ask which GPU to use (for multi GPUs systems)
+        gpus = self.detect_gpus()
+        self.log(f"Detected GPUs: {gpus}", "info")
+        gpu_config_file = Path(self.directory) / ".gpu_config"
+        if not gpu_config_file.exists() and len(gpus) > 2:
+            selected_gpu = self.show_question_dialog(
+                "Select GPU",
+                "Select which GPU to use for Affinity applications:\n\n"
+                "This is useful for dual GPU setups (e.g., Intel + NVIDIA, AMD + NVIDIA).\n"
+                "If you want to enable OpenCL and have a NVIDIA GPU, it's recommended to select it for better compatibility.\n"
+            )
+            self.log(f"Selected GPU: {selected_gpu}", "info")
+        
+        if self.check_cancelled():
+            return
         
         # Ask about OpenCL support (only if not already configured)
         opencl_config_file = Path(self.directory) / ".opencl_enabled"
@@ -7638,14 +7666,8 @@ class AffinityInstallerGUI(QMainWindow):
             
             # Setup vkd3d-proton (only if OpenCL is enabled and not AMD GPU)
             if self.is_opencl_enabled():
-                if self.has_amd_gpu():
-                    self.update_progress_text("AMD GPU detected - installing DXVK via winetricks...")
-                    self.update_progress(0.80)
-                    self.log("AMD GPU detected - installing DXVK via winetricks", "info")
-                    self.install_dxvk_dlls()
-                    self.log("Installing d3d12 DLLs for compatibility...", "info")
-                    self.install_d3d12_dlls()
-                elif self.has_nvidia_gpu():
+                gpu_id = self.get_selected_gpu()
+                if self.has_nvidia_gpu() and (gpu_id.startswith("nvidia_") or gpu_id.startswith("auto")):
                     # Ask NVIDIA users to choose between DXVK and vkd3d
                     preference = self.ask_nvidia_dxvk_vkd3d_choice()
                     if preference == "dxvk":
@@ -7657,6 +7679,13 @@ class AffinityInstallerGUI(QMainWindow):
                         self.update_progress_text("Setting up vkd3d-proton for OpenCL...")
                         self.update_progress(0.80)
                         self.setup_vkd3d()
+                elif self.has_amd_gpu() and (gpu_id.startswith("amd_") or gpu_id.startswith("auto")):
+                    self.update_progress_text("AMD GPU detected - installing DXVK via winetricks...")
+                    self.update_progress(0.80)
+                    self.log("AMD GPU detected - installing DXVK via winetricks", "info")
+                    self.install_dxvk_dlls()
+                    self.log("Installing d3d12 DLLs for compatibility...", "info")
+                    self.install_d3d12_dlls() 
                 else:
                     self.update_progress_text("Setting up vkd3d-proton for OpenCL...")
                     self.update_progress(0.80)
