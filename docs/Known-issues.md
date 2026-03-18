@@ -70,9 +70,6 @@ This document lists known issues and their workarounds. For the latest updates, 
 
 **Workaround:** Use the [AppImage installer](../INSTALLATION.md#1-appimage-recommended-for-beginners) instead. See [System Requirements](SYSTEM-REQUIREMENTS.md) for details.
 
-### PikaOS GUI Installer Not Working
-**Issue:** The Python GUI installer does not work on PikaOS.
-
 **Workaround:** Use the [AppImage installer](../INSTALLATION.md#1-appimage-recommended-for-beginners) instead.
 
 ### Read-Only Filesystem Support (SteamOS, Silverblue, etc.)

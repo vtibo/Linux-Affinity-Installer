@@ -6856,7 +6856,7 @@ class AffinityInstallerGUI(QMainWindow):
         self.update_progress(0.0)
         
         # Show unsupported warning
-        if self.distro in ["ubuntu", "linuxmint", "zorin", "bazzite"]:
+        if self.distro in ["bazzite"]:
             self.show_unsupported_warning()
         
         missing = []
@@ -6911,7 +6911,7 @@ class AffinityInstallerGUI(QMainWindow):
             self.log(".NET SDK is installed", "success")
         
         # Handle unsupported distributions - show warning and allow retry
-        if self.distro in ["ubuntu", "linuxmint", "pop", "zorin", "bazzite"]:
+        if self.distro in ["bazzite"]:
             if missing:
                 self.log("\n" + "="*80, "error")
                 self.log("⚠️  WARNING: UNSUPPORTED DISTRIBUTION", "error")
@@ -6942,7 +6942,28 @@ class AffinityInstallerGUI(QMainWindow):
                 self.log("No support will be provided if issues arise.", "warning")
         
         # Install missing dependencies (only for supported distributions)
-        if missing and self.distro not in ["ubuntu", "linuxmint", "pop", "zorin", "bazzite"]:
+        # For Ubuntu/Mint/Zorin, always run WineHQ setup to ensure proper Wine version
+        if self.distro in ["ubuntu", "linuxmint", "zorin"]:
+            # Always run WineHQ setup for Ubuntu-based distros
+            self.log(f"\nSetting up WineHQ for {self.format_distro_name()}...", "info")
+            self.update_progress_text(f"Setting up Wine for {self.format_distro_name()}...")
+            
+            # Request password before attempting installation
+            self.log("Administrator privileges required for package installation.", "info")
+            self.update_progress_text("Requesting administrator password...")
+            
+            password = self.get_sudo_password()
+            if password is None:
+                self.log("Password entry cancelled. Cannot install dependencies.", "error")
+                return False
+            
+            if not self.sudo_password_validated:
+                if not self.validate_sudo_password(password):
+                    self.log("Password validation failed. Cannot install dependencies.", "error")
+                    return False
+            
+            return self.install_dependencies()
+        elif missing and self.distro not in ["bazzite"]:
             self.log(f"\nInstalling missing dependencies: {', '.join(missing)}", "info")
             self.update_progress_text(f"Installing {len(missing)} missing packages...")
             self.update_progress(0.5)  # Start second half of progress
@@ -7015,10 +7036,13 @@ class AffinityInstallerGUI(QMainWindow):
     
     def install_dependencies(self):
         """Install dependencies based on distribution"""
+        self.log(f"DEBUG: install_dependencies called with distro={self.distro}", "info")
         if self.distro == "pikaos":
             return self.install_pikaos_dependencies()
         if self.distro == "pop":
             return self.install_popos_dependencies()
+        if self.distro in ["ubuntu", "linuxmint", "zorin"]:
+            return self.install_ubuntu_based_dependencies()
         
         commands = {
             "arch": ["sudo", "pacman", "-S", "--needed", "--noconfirm", "wine", "winetricks", "wget", "curl", "p7zip", "tar", "jq", "zstd", "dotnet-sdk", "dotnet-sdk-8.0", "dotnet-sdk-10.0"],
@@ -7307,6 +7331,9 @@ class AffinityInstallerGUI(QMainWindow):
             # Clean up temp file
             os.unlink(tmp_key_path)
             
+            # Remove existing key file to avoid overwrite prompts
+            self.run_command(["sudo", "rm", "-f", "/etc/apt/keyrings/winehq-archive.key"], check=False)
+            
             # Run GPG command with sudo, passing binary key data
             gpg_proc = subprocess.Popen(
                 ["sudo", "-S", "gpg", "--dearmor", "-o", "/etc/apt/keyrings/winehq-archive.key", "-"],
@@ -7409,6 +7436,379 @@ class AffinityInstallerGUI(QMainWindow):
         self.update_progress(1.0)
         self.update_progress_text("Pop!_OS dependencies installed")
         self.log("All dependencies installed for Pop!_OS", "success")
+        return True
+    
+    def install_ubuntu_based_dependencies(self):
+        """Install dependencies for Ubuntu, Linux Mint, and Zorin OS with WineHQ staging"""
+        print("DEBUG: install_ubuntu_based_dependencies() CALLED!", flush=True)
+        self.log("===========================================", "info")
+        self.log("★ Starting Ubuntu-based dependency installation ★", "warning")
+        self.log(f"★ Detected distro: {self.distro} ★", "warning")
+        self.log("===========================================", "info")
+        distro_name = self.format_distro_name()
+        self.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        self.log(f"{distro_name} Configuration", "info")
+        self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+        
+        # Detect Ubuntu version codename
+        codename = "jammy"
+        ubuntu_version_num = 22.04
+        try:
+            with open("/etc/os-release", "r") as f:
+                for line in f:
+                    if line.startswith("VERSION_CODENAME="):
+                        codename = line.split("=")[1].strip()
+                    if line.startswith("VERSION_ID="):
+                        version_str = line.split("=")[1].strip().strip('"')
+                        ubuntu_version_num = float(version_str)
+        except (IOError, FileNotFoundError):
+            pass
+        
+        # Linux Mint and Zorin may report their own version, need to detect base
+        # Linux Mint 22 = Ubuntu 24.04 (noble), Linux Mint 21.x = Ubuntu 22.04 (jammy)
+        # Zorin 18 = Ubuntu 24.04 (noble), Zorin 17.x = Ubuntu 22.04 (jammy)
+        if self.distro == "linuxmint":
+            # Force noble for Mint 22 - Mint 22 is based on Ubuntu 24.04
+            # Check both VERSION_ID and DEBIAN_CODENAME
+            detected_mint_version = ""
+            detected_debian_codename = ""
+            
+            try:
+                with open("/etc/os-release", "r") as f:
+                    for line in f:
+                        if line.startswith("VERSION_ID="):
+                            detected_mint_version = line.split("=")[1].strip().strip('"')
+                        if line.startswith("DEBIAN_CODENAME="):
+                            detected_debian_codename = line.split("=")[1].strip()
+            except:
+                pass
+            
+            # Mint 22+ uses Ubuntu 24.04 (noble), older uses 22.04 (jammy)
+            print(f"DEBUG: Mint version='{detected_mint_version}', debian_codename='{detected_debian_codename}'", flush=True)
+            if detected_mint_version.startswith("22") or detected_debian_codename == "noble":
+                codename = "noble"
+                ubuntu_version_num = 24.04
+            else:
+                codename = "jammy"
+                ubuntu_version_num = 22.04
+                
+        elif self.distro == "zorin":
+            # Force noble for Zorin 18 - Zorin 18 is based on Ubuntu 24.04
+            detected_zorin_version = ""
+            detected_debian_codename = ""
+            
+            try:
+                with open("/etc/os-release", "r") as f:
+                    for line in f:
+                        if line.startswith("VERSION_ID="):
+                            detected_zorin_version = line.split("=")[1].strip().strip('"')
+                        if line.startswith("DEBIAN_CODENAME="):
+                            detected_debian_codename = line.split("=")[1].strip()
+            except:
+                pass
+            
+            # Zorin 18+ uses Ubuntu 24.04 (noble), older uses 22.04 (jammy)
+            if detected_zorin_version.startswith("18") or detected_debian_codename == "noble":
+                codename = "noble"
+                ubuntu_version_num = 24.04
+            else:
+                codename = "jammy"
+                ubuntu_version_num = 22.04
+        
+        self.log(f"Detected codename: {codename}, version: {ubuntu_version_num}", "info")
+        
+        # Debug: log raw os-release values for Mint/Zorin
+        if self.distro in ["linuxmint", "zorin"]:
+            try:
+                with open("/etc/os-release", "r") as f:
+                    content = f.read()
+                # Just log the codename lines
+                for line in content.split('\n'):
+                    if 'CODENAME' in line or 'VERSION_ID' in line:
+                        self.log(f"DEBUG: {line}", "info")
+            except:
+                pass
+        
+        # Validate codename is valid for WineHQ
+        if codename not in ["noble", "jammy", "focal"]:
+            self.log(f"Warning: codename '{codename}' may not have WineHQ packages. Using 'jammy' as fallback.", "warning")
+            codename = "jammy"
+        
+        # Check if we should use official Wine (Ubuntu 24.04+) or WineHQ staging
+        # Note: Linux Mint 22 still uses WineHQ staging (better compatibility)
+        is_mint = distro_name.lower() in ["linux mint", "mint", "zorin"]
+        use_official_wine = ubuntu_version_num >= 24.04 and not is_mint
+        
+        if use_official_wine:
+            self.log(f"Using official Wine packages for Ubuntu {ubuntu_version_num}...\n", "info")
+            return self.install_ubuntu_official_wine(codename)
+        else:
+            if is_mint:
+                self.log(f"Using WineHQ staging for {distro_name} (better compatibility)...\n", "info")
+            else:
+                self.log(f"Setting up WineHQ staging for {distro_name}...\n", "info")
+            return self.install_ubuntu_winehq_staging(codename)
+    
+    def install_ubuntu_official_wine(self, codename):
+        """Install Wine using official Ubuntu repositories for 24.04+"""
+        distro_name = self.format_distro_name()
+        total_steps = 4
+        current_step = 0
+        
+        # Add i386 architecture
+        current_step += 1
+        self.update_progress_text(f"Step {current_step}/{total_steps}: Adding i386 architecture...")
+        self.update_progress(current_step / total_steps)
+        self.log("Adding i386 architecture...", "info")
+        success, _, _ = self.run_command(["sudo", "dpkg", "--add-architecture", "i386"])
+        if not success:
+            self.log("Failed to add i386 architecture", "error")
+            return False
+        
+        # Update package lists
+        current_step += 1
+        self.update_progress_text(f"Step {current_step}/{total_steps}: Updating package lists...")
+        self.update_progress(current_step / total_steps)
+        self.log("Updating package lists...", "info")
+        success, _, _ = self.run_command(["sudo", "apt", "update"])
+        if not success:
+            self.log("Failed to update package lists", "error")
+            return False
+        
+        # Install Wine
+        current_step += 1
+        self.update_progress_text(f"Step {current_step}/{total_steps}: Installing Wine...")
+        self.update_progress(current_step / total_steps)
+        self.log("Installing Wine (official Ubuntu packages)...", "info")
+        success, _, _ = self.run_command(["sudo", "apt", "install", "-y", "wine", "wine64", "wine32", "libwine", "libwine:i386", "fonts-wine"])
+        if not success:
+            self.log("Failed to install Wine", "error")
+            return False
+        
+        # Install remaining dependencies
+        current_step += 1
+        self.update_progress_text(f"Step {current_step}/{total_steps}: Installing remaining dependencies...")
+        self.update_progress(current_step / total_steps)
+        self.log("Installing remaining dependencies...", "info")
+        success, _, _ = self.run_command([
+            "sudo", "apt", "install", "-y", "winetricks", "wget", "curl", "p7zip-full", "tar", "jq", "zstd", "dotnet-sdk-8.0", "dotnet-sdk-10.0"
+        ])
+        if not success:
+            self.log("Failed to install remaining dependencies", "error")
+            self.log("Note: dotnet-sdk packages may require Microsoft's repository. You can install them manually if needed.", "warning")
+            return False
+        
+        self.update_progress(1.0)
+        self.update_progress_text(f"{distro_name} dependencies installed")
+        self.log(f"All dependencies installed for {distro_name}", "success")
+        return True
+    
+    def install_ubuntu_winehq_staging(self, codename):
+        """Install WineHQ staging for older Ubuntu versions (< 24.04)"""
+        distro_name = self.format_distro_name()
+        
+        # Total steps: keyrings, gpg key, i386, repo, apt update, wine install, deps install = 7 steps
+        total_steps = 7
+        current_step = 0
+        
+        # Create keyrings directory
+        current_step += 1
+        self.update_progress_text(f"Step {current_step}/{total_steps}: Creating keyrings directory...")
+        self.update_progress(current_step / total_steps)
+        self.log("Creating APT keyrings directory...", "info")
+        success, _, _ = self.run_command(["sudo", "mkdir", "-pm755", "/etc/apt/keyrings"])
+        if not success:
+            self.log("Failed to create keyrings directory", "error")
+            return False
+        
+        # Add GPG key
+        current_step += 1
+        self.update_progress_text(f"Step {current_step}/{total_steps}: Adding WineHQ GPG key...")
+        self.update_progress(current_step / total_steps)
+        self.log("Adding WineHQ GPG key...", "info")
+        
+        # Get sudo password for GPG operation
+        password = self.get_sudo_password()
+        if password is None:
+            self.log("Authentication cancelled by user", "error")
+            return False
+        
+        # Validate password if not already validated
+        if not self.sudo_password_validated:
+            if not self.validate_sudo_password(password):
+                self.log("Authentication failed", "error")
+                return False
+        
+        # Download GPG key to temporary file first (handles binary data correctly)
+        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+            tmp_key_path = tmp_file.name
+        
+        try:
+            # Download the key in binary mode
+            success, _, _ = self.run_command(["wget", "-O", tmp_key_path, "https://dl.winehq.org/wine-builds/winehq.key"])
+            if not success:
+                self.log("Failed to download GPG key", "error")
+                os.unlink(tmp_key_path)
+                return False
+            
+            # Read the key file in binary mode
+            with open(tmp_key_path, 'rb') as key_file:
+                key_data = key_file.read()
+            
+            # Clean up temp file
+            os.unlink(tmp_key_path)
+            
+            # Remove existing key file to avoid overwrite prompts
+            self.run_command(["sudo", "rm", "-f", "/etc/apt/keyrings/winehq-archive.key"], check=False)
+            
+            # Run GPG command with sudo, passing binary key data
+            gpg_proc = subprocess.Popen(
+                ["sudo", "-S", "gpg", "--dearmor", "-o", "/etc/apt/keyrings/winehq-archive.key", "-"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            # Send password first (as bytes), then the key data (binary)
+            gpg_input = f"{self.sudo_password}\n".encode() + key_data
+            gpg_stdout, gpg_stderr = gpg_proc.communicate(input=gpg_input)
+            
+            if gpg_proc.returncode == 0:
+                self.log("WineHQ GPG key added", "success")
+            else:
+                error_msg = gpg_stderr.decode('utf-8', errors='ignore') if gpg_stderr else "Unknown error"
+                self.log(f"Failed to add GPG key: {error_msg}", "error")
+                return False
+        except Exception as e:
+            # Clean up temp file on error
+            if os.path.exists(tmp_key_path):
+                try:
+                    os.unlink(tmp_key_path)
+                except:
+                    pass
+            self.log(f"Failed to add GPG key: {str(e)}", "error")
+            return False
+        
+        # Add i386 architecture
+        current_step += 1
+        self.update_progress_text(f"Step {current_step}/{total_steps}: Adding i386 architecture...")
+        self.update_progress(current_step / total_steps)
+        self.log("Adding i386 architecture...", "info")
+        success, stdout, stderr = self.run_command(["sudo", "dpkg", "--add-architecture", "i386"])
+        if not success:
+            self.log(f"Failed to add i386 architecture - STDOUT: {stdout}", "error")
+            self.log(f"Failed to add i386 architecture - STDERR: {stderr}", "error")
+            return False
+        else:
+            self.log(f"Added i386 architecture successfully", "success")
+        
+        # Add repository
+        current_step += 1
+        self.update_progress_text(f"Step {current_step}/{total_steps}: Adding WineHQ repository...")
+        self.update_progress(current_step / total_steps)
+        self.log("Adding WineHQ repository...", "info")
+        self.log(f"DEBUG: Using codename '{codename}' for WineHQ repo", "info")
+        
+        # Remove existing file first to avoid overwrite prompt
+        repo_file = Path(f"/etc/apt/sources.list.d/winehq-{codename}.sources")
+        if repo_file.exists():
+            self.run_command(["sudo", "rm", "-f", str(repo_file)], check=False)
+        
+        repo_url = f"https://dl.winehq.org/wine-builds/ubuntu/dists/{codename}/winehq-{codename}.sources"
+        self.log(f"DEBUG: Downloading repo from: {repo_url}", "info")
+        self.log(f"DEBUG: Running command: sudo wget -NP /etc/apt/sources.list.d/ {repo_url}", "info")
+        
+        # Use curl to download (no sudo needed), then sudo to move
+        max_retries = 3
+        for attempt in range(max_retries):
+            # First download without sudo to /tmp
+            success, stdout, stderr = self.run_command([
+                "curl", "-fsSL", "-o", f"/tmp/winehq-{codename}.sources", repo_url
+            ])
+            self.log(f"DEBUG: curl download exit code: {success}", "info")
+            if not success:
+                if stdout:
+                    self.log(f"DEBUG: curl STDOUT:\n{stdout}", "info")
+                if stderr:
+                    self.log(f"DEBUG: curl STDERR:\n{stderr}", "info")
+            
+            # Check if file was downloaded to /tmp
+            tmp_file = Path(f"/tmp/winehq-{codename}.sources")
+            if tmp_file.exists():
+                self.log(f"Downloaded to /tmp successfully", "success")
+                
+                # Now move to /etc/apt with sudo
+                success2, stdout2, stderr2 = self.run_command([
+                    "sudo", "mv", f"/tmp/winehq-{codename}.sources", f"/etc/apt/sources.list.d/winehq-{codename}.sources"
+                ])
+                if success2:
+                    self.log(f"Moved file to sources.list.d", "success")
+                else:
+                    self.log(f"Failed to move file - STDOUT: {stdout2}, STDERR: {stderr2}", "error")
+            
+            # Check if repo file exists
+            repo_file = Path(f"/etc/apt/sources.list.d/winehq-{codename}.sources")
+            
+            # Debug: list all files in sources.list.d
+            sources_dir = Path("/etc/apt/sources.list.d")
+            if sources_dir.exists():
+                files = list(sources_dir.glob("*"))
+                self.log(f"DEBUG: Files in sources.list.d: {[f.name for f in files]}", "info")
+            
+            if repo_file.exists():
+                self.log(f"WineHQ repository file found: {repo_file}", "success")
+                break
+            
+            if attempt < max_retries - 1:
+                self.log(f"Warning: Repository file not found at {repo_file}, retrying... (attempt {attempt + 1}/{max_retries})", "warning")
+            else:
+                self.log("Failed to add repository after multiple attempts", "error")
+                if stdout:
+                    self.log(f"STDOUT: {stdout}", "error")
+                if stderr:
+                    self.log(f"STDERR: {stderr}", "error")
+                return False
+        
+        # Update package lists
+        current_step += 1
+        self.update_progress_text(f"Step {current_step}/{total_steps}: Updating package lists...")
+        self.update_progress(current_step / total_steps)
+        self.log("Updating package lists...", "info")
+        success, _, _ = self.run_command(["sudo", "apt", "update"])
+        if not success:
+            self.log("Failed to update package lists", "error")
+            return False
+        
+        # Install WineHQ staging
+        current_step += 1
+        self.update_progress_text(f"Step {current_step}/{total_steps}: Installing WineHQ staging...")
+        self.update_progress(current_step / total_steps)
+        self.log("Installing WineHQ staging...", "info")
+        success, stdout, stderr = self.run_command(["sudo", "apt", "install", "--install-recommends", "-y", "winehq-staging"])
+        if not success:
+            self.log("Failed to install WineHQ staging", "error")
+            if stdout:
+                self.log(f"STDOUT: {stdout}", "error")
+            if stderr:
+                self.log(f"STDERR: {stderr}", "error")
+            return False
+        
+        # Install remaining dependencies
+        current_step += 1
+        self.update_progress_text(f"Step {current_step}/{total_steps}: Installing remaining dependencies...")
+        self.update_progress(current_step / total_steps)
+        self.log("Installing remaining dependencies...", "info")
+        success, _, _ = self.run_command([
+            "sudo", "apt", "install", "-y", "winetricks", "wget", "curl", "p7zip-full", "tar", "jq", "zstd", "dotnet-sdk-8.0", "dotnet-sdk-10.0"
+        ])
+        if not success:
+            self.log("Failed to install remaining dependencies", "error")
+            self.log("Note: dotnet-sdk packages may require Microsoft's repository. You can install them manually if needed.", "warning")
+            return False
+        
+        self.update_progress(1.0)
+        self.update_progress_text(f"{distro_name} dependencies installed")
+        self.log(f"All dependencies installed for {distro_name}", "success")
         return True
     
     def setup_wine(self, wine_version="11.0"):
@@ -9065,7 +9465,7 @@ class AffinityInstallerGUI(QMainWindow):
             self.detect_distro()
 
         # Check for distributions that should be directed to PikaOS instead
-        if self.distro in ["linuxmint", "zorin"]:
+        if self.distro in ["bazzite"]:
             distro_name = self.format_distro_name()
             message = f"""{distro_name} is not officially supported for optimal Affinity compatibility.
 
