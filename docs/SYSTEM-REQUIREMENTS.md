@@ -13,7 +13,7 @@
 - Zorin
 - Ubuntu
 - openSUSE (Tumbleweed/Leap)
-- PikaOS 4 ⚠️ **Note:** Python GUI installer does not work. Use [AppImage](INSTALLATION.md#1-appimage-recommended-for-beginners) instead.
+- PikaOS 4
 - XeroLinux
 
 ### Unsupported Distributions (No Support Provided)
